@@ -250,15 +250,42 @@
     if (editMode) render();
   }
 
-  let saveTimer = 0;
+  let saveTimer = 0, publishTimer = 0;
   function saveVibe() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
       try {
         const r = await fetch("/__vibe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(VIBE) });
-        toast(r.ok ? `Сохранено · отмечено ${vibeCount()}` : "Не сохранилось, попробуй ещё раз");
+        if (!r.ok) { toast("Не сохранилось, попробуй ещё раз"); return; }
+        const j = await r.json();
+        toast(`Сохранено · отмечено ${vibeCount()}. На сайт уйдёт само`);
+        setPublishStatus(`Отправлю на сайт через ${j.publishIn || 20} секунд после последней пометки.`);
+        clearTimeout(publishTimer);
+        publishTimer = setTimeout(() => watchPublish(8), ((j.publishIn || 20) + 3) * 1000);
       } catch (e) { toast("Не сохранилось: режим правки выключен"); }
     }, 250);
+  }
+
+  /* сервер правки сам отправляет vibe.js на GitHub; узнаём, чем закончилось */
+  async function watchPublish(triesLeft) {
+    try {
+      const p = (await (await fetch("/__vibe", { cache: "no-store" })).json()).publish || {};
+      if (p.state === "done") {
+        setPublishStatus("Пометки отправлены на сайт. Художница увидит их через минуту-две.");
+        toast("Вайб отправлен на сайт");
+        return;
+      }
+      if (p.state === "error") {
+        setPublishStatus("Не получилось отправить на сайт: " + (p.message || "неизвестная ошибка") + ". Пометки сохранены, напиши Claude «обнови сайт».");
+        toast("Не получилось отправить на сайт");
+        return;
+      }
+    } catch (e) { /* сервер выключили — пометки всё равно в файле */ }
+    if (triesLeft > 1) publishTimer = setTimeout(() => watchPublish(triesLeft - 1), 5000);
+  }
+  function setPublishStatus(text) {
+    const el = $("#publish-status");
+    if (el) { el.textContent = text; el.hidden = false; }
   }
   function toggleVibe(src) {
     if (isVibe(src)) delete VIBE[src]; else VIBE[src] = { note: "" };
